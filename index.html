@@ -883,7 +883,7 @@
 
   // Agrupa uma lista de pacotes em seções por mês (cronológico) e, dentro de
   // cada mês, separa em "Dias de Semana" e "Final de Semana". Meses futuros
-  // são marcados como bloqueados (somente edição permitida nos cards).
+  // são marcados como bloqueados (somente editar ou excluir permitidos nos cards).
   function montarGruposPorMes(lista){
     var wrapper = document.createElement('div');
     wrapper.className = "meses-wrapper";
@@ -917,7 +917,7 @@
       header.className = "mes-header";
       header.innerHTML =
         '<span class="mes-titulo">📅 ' + (grupo.data ? escapeHtml(labelMes(grupo.data)) : "Sem data definida") + '</span>' +
-        (bloqueado ? '<span class="badge-bloqueado">🔒 Mês ainda não chegou — somente edição</span>' : '');
+        (bloqueado ? '<span class="badge-bloqueado">🔒 Mês ainda não chegou — somente editar ou excluir</span>' : '');
       secao.appendChild(header);
 
       var diasSemana = grupo.itens.filter(function(x){ return !x.data || !ehFimDeSemana(x.data); });
@@ -996,7 +996,7 @@
 
     var actions = div.querySelector('.card-actions');
 
-    var tituloMesBloqueado = "Mês ainda não chegou — enquanto isso, só é possível editar este pacote.";
+    var tituloMesBloqueado = "Mês ainda não chegou — enquanto isso, só é possível editar ou excluir este pacote.";
     var tituloDataPassada = "A data deste evento já passou e não pode mais ser marcada.";
 
     if(!p.entregue){
@@ -1051,12 +1051,7 @@
     var btnExcluir = document.createElement('button');
     btnExcluir.className = "btn-excluir";
     btnExcluir.textContent = "🗑 Excluir";
-    if(mesBloqueado){
-      btnExcluir.disabled = true;
-      btnExcluir.title = tituloMesBloqueado;
-    } else {
-      btnExcluir.onclick = function(){ pedirConfirmacaoExclusao(p.id, p.nome); };
-    }
+    btnExcluir.onclick = function(){ pedirConfirmacaoExclusao(p.id, p.nome); };
     actions.appendChild(btnExcluir);
 
     return div;
