@@ -199,6 +199,72 @@
     gap:18px;
   }
 
+  .pacotes-lista{
+    display:flex;
+    flex-direction:column;
+    gap:30px;
+  }
+
+  .mes-secao{
+    background:rgba(255,255,255,0.4);
+    border-radius:var(--radius);
+    padding:6px 6px 20px;
+  }
+  .mes-secao.bloqueado{
+    background:repeating-linear-gradient(135deg, rgba(199,205,211,0.18), rgba(199,205,211,0.18) 14px, rgba(199,205,211,0.32) 14px, rgba(199,205,211,0.32) 28px);
+    border:2px dashed var(--silver);
+  }
+
+  .mes-header{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    flex-wrap:wrap;
+    padding:10px 14px;
+    margin-bottom:14px;
+    border-bottom:2px solid var(--border);
+  }
+  .mes-titulo{
+    font-size:20px;
+    font-weight:800;
+    color:var(--dark);
+    text-transform:capitalize;
+  }
+  .badge-bloqueado{
+    background:var(--dark);
+    color:#fff;
+    font-size:13px;
+    font-weight:700;
+    padding:6px 14px;
+    border-radius:20px;
+    letter-spacing:0.3px;
+  }
+
+  .subsecao{
+    padding:0 14px;
+    margin-bottom:22px;
+  }
+  .subsecao:last-child{margin-bottom:0;}
+  .subsecao-titulo{
+    margin:0 0 12px;
+    font-size:16px;
+    font-weight:800;
+    color:var(--text-soft);
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+  }
+
+  .card.card-bloqueado{
+    border-left:6px dashed var(--silver);
+  }
+  .card-actions button:disabled{
+    opacity:0.45;
+    cursor:not-allowed;
+    filter:grayscale(0.4);
+  }
+  .card-actions button:disabled:hover{filter:grayscale(0.4);}
+  .card-actions button:disabled:active{transform:none;}
+
   .card{
     background:var(--card);
     border-radius:var(--radius);
@@ -523,7 +589,7 @@
         <h2>Pacotes para Entregar</h2>
         <div class="count" id="countPendentes">0</div>
       </div>
-      <div class="grid" id="gridPendentes"></div>
+      <div class="pacotes-lista" id="gridPendentes"></div>
       <div class="empty-state" id="emptyPendentes" style="display:none;">
         <span class="emoji">📦</span>
         Nenhum pacote pendente. Clique em "Novo Pacote" para começar.
@@ -539,7 +605,7 @@
         <h2>Pacotes Entregues</h2>
         <div class="count" id="countEntregues">0</div>
       </div>
-      <div class="grid" id="gridEntregues"></div>
+      <div class="pacotes-lista" id="gridEntregues"></div>
       <div class="empty-state" id="emptyEntregues" style="display:none;">
         <span class="emoji">✅</span>
         Nenhum pacote entregue ainda.
@@ -691,6 +757,49 @@
     return escapeHtml(str).replace(/\n/g,"<br>");
   }
 
+  var MESES_PT = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+  // Converte "YYYY-MM-DD" em Date local à meia-noite (evita bug de fuso horário do new Date(iso))
+  function parseDataEvento(iso){
+    if(!iso) return null;
+    var partes = iso.split('-');
+    if(partes.length !== 3) return null;
+    var ano = Number(partes[0]), mes = Number(partes[1]), dia = Number(partes[2]);
+    if(isNaN(ano) || isNaN(mes) || isNaN(dia)) return null;
+    var d = new Date(ano, mes - 1, dia);
+    d.setHours(0,0,0,0);
+    return d;
+  }
+
+  function hojeSemHora(){
+    var h = new Date();
+    h.setHours(0,0,0,0);
+    return h;
+  }
+
+  function chaveMes(data){
+    return data.getFullYear() + '-' + String(data.getMonth() + 1).padStart(2,'0');
+  }
+
+  function labelMes(data){
+    return MESES_PT[data.getMonth()] + " de " + data.getFullYear();
+  }
+
+  function ehFimDeSemana(data){
+    var dia = data.getDay();
+    return dia === 0 || dia === 6; // domingo ou sábado
+  }
+
+  // Um mês é "futuro" (ainda não chegou) quando é posterior ao mês/ano atual
+  function mesEhFuturo(data){
+    return chaveMes(data) > chaveMes(hojeSemHora());
+  }
+
+  // Uma data já passou quando é anterior a hoje (hoje ainda pode ser marcado)
+  function dataJaPassou(data){
+    return data.getTime() < hojeSemHora().getTime();
+  }
+
   function montarEndereco(p){
     var partes = [];
     if(p.rua) partes.push(p.rua);
@@ -768,13 +877,94 @@
     document.getElementById('emptyPendentes').style.display = pendentes.length ? "none" : "block";
     document.getElementById('emptyEntregues').style.display = entregues.length ? "none" : "block";
 
-    pendentes.forEach(function(p){ gridP.appendChild(criarCard(p)); });
-    entregues.forEach(function(p){ gridE.appendChild(criarCard(p)); });
+    if(pendentes.length) gridP.appendChild(montarGruposPorMes(pendentes));
+    if(entregues.length) gridE.appendChild(montarGruposPorMes(entregues));
   }
 
-  function criarCard(p){
+  // Agrupa uma lista de pacotes em seções por mês (cronológico) e, dentro de
+  // cada mês, separa em "Dias de Semana" e "Final de Semana". Meses futuros
+  // são marcados como bloqueados (somente edição permitida nos cards).
+  function montarGruposPorMes(lista){
+    var wrapper = document.createElement('div');
+    wrapper.className = "meses-wrapper";
+
+    var grupos = {};
+    var SEM_DATA = "_sem-data";
+
+    lista.forEach(function(p){
+      var data = parseDataEvento(p.dataEvento);
+      var chave = data ? chaveMes(data) : SEM_DATA;
+      if(!grupos[chave]){
+        grupos[chave] = { data: data, itens: [] };
+      }
+      grupos[chave].itens.push({ pacote: p, data: data });
+    });
+
+    var chaves = Object.keys(grupos).sort(function(a, b){
+      if(a === SEM_DATA) return 1;
+      if(b === SEM_DATA) return -1;
+      return a < b ? -1 : (a > b ? 1 : 0);
+    });
+
+    chaves.forEach(function(chave){
+      var grupo = grupos[chave];
+      var bloqueado = grupo.data ? mesEhFuturo(grupo.data) : false;
+
+      var secao = document.createElement('div');
+      secao.className = "mes-secao" + (bloqueado ? " bloqueado" : "");
+
+      var header = document.createElement('div');
+      header.className = "mes-header";
+      header.innerHTML =
+        '<span class="mes-titulo">📅 ' + (grupo.data ? escapeHtml(labelMes(grupo.data)) : "Sem data definida") + '</span>' +
+        (bloqueado ? '<span class="badge-bloqueado">🔒 Mês ainda não chegou — somente edição</span>' : '');
+      secao.appendChild(header);
+
+      var diasSemana = grupo.itens.filter(function(x){ return !x.data || !ehFimDeSemana(x.data); });
+      var fimDeSemana = grupo.itens.filter(function(x){ return x.data && ehFimDeSemana(x.data); });
+
+      if(diasSemana.length){
+        secao.appendChild(montarSubsecao("📌 Dias de Semana", diasSemana, bloqueado));
+      }
+      if(fimDeSemana.length){
+        secao.appendChild(montarSubsecao("🌞 Final de Semana", fimDeSemana, bloqueado));
+      }
+
+      wrapper.appendChild(secao);
+    });
+
+    return wrapper;
+  }
+
+  function montarSubsecao(titulo, itens, mesBloqueado){
+    var sub = document.createElement('div');
+    sub.className = "subsecao";
+
+    var h = document.createElement('h4');
+    h.className = "subsecao-titulo";
+    h.textContent = titulo + " (" + itens.length + ")";
+    sub.appendChild(h);
+
+    var grid = document.createElement('div');
+    grid.className = "grid";
+    itens.forEach(function(x){
+      grid.appendChild(criarCard(x.pacote, {
+        mesBloqueado: mesBloqueado,
+        dataPassada: x.data ? dataJaPassou(x.data) : false
+      }));
+    });
+    sub.appendChild(grid);
+
+    return sub;
+  }
+
+  function criarCard(p, contexto){
+    contexto = contexto || {};
+    var mesBloqueado = !!contexto.mesBloqueado;
+    var dataPassada = !!contexto.dataPassada;
+
     var div = document.createElement('div');
-    div.className = "card" + (p.entregue ? " entregue" : "");
+    div.className = "card" + (p.entregue ? " entregue" : "") + (mesBloqueado ? " card-bloqueado" : "");
 
     var valorPago = Number(p.valorPago) || 0;
     var valorTotal = Number(p.valorTotal) || 0;
@@ -806,17 +996,30 @@
 
     var actions = div.querySelector('.card-actions');
 
+    var tituloMesBloqueado = "Mês ainda não chegou — enquanto isso, só é possível editar este pacote.";
+    var tituloDataPassada = "A data deste evento já passou e não pode mais ser marcada.";
+
     if(!p.entregue){
       var btnEntregar = document.createElement('button');
       btnEntregar.className = "btn-entregar";
       btnEntregar.textContent = "✅ Marcar Entregue";
-      btnEntregar.onclick = function(){ marcarEntregue(p.id, true); };
+      if(mesBloqueado || dataPassada){
+        btnEntregar.disabled = true;
+        btnEntregar.title = mesBloqueado ? tituloMesBloqueado : tituloDataPassada;
+      } else {
+        btnEntregar.onclick = function(){ marcarEntregue(p.id, true); };
+      }
       actions.appendChild(btnEntregar);
     } else {
       var btnVoltar = document.createElement('button');
       btnVoltar.className = "btn-voltar";
       btnVoltar.textContent = "↩ Voltar p/ Pendente";
-      btnVoltar.onclick = function(){ marcarEntregue(p.id, false); };
+      if(mesBloqueado){
+        btnVoltar.disabled = true;
+        btnVoltar.title = tituloMesBloqueado;
+      } else {
+        btnVoltar.onclick = function(){ marcarEntregue(p.id, false); };
+      }
       actions.appendChild(btnVoltar);
     }
 
@@ -824,7 +1027,12 @@
       var btnPago = document.createElement('button');
       btnPago.className = "btn-pago";
       btnPago.textContent = "💰 Marcar Pago";
-      btnPago.onclick = function(){ marcarPago(p.id); };
+      if(mesBloqueado){
+        btnPago.disabled = true;
+        btnPago.title = tituloMesBloqueado;
+      } else {
+        btnPago.onclick = function(){ marcarPago(p.id); };
+      }
       actions.appendChild(btnPago);
     }
 
@@ -843,7 +1051,12 @@
     var btnExcluir = document.createElement('button');
     btnExcluir.className = "btn-excluir";
     btnExcluir.textContent = "🗑 Excluir";
-    btnExcluir.onclick = function(){ pedirConfirmacaoExclusao(p.id, p.nome); };
+    if(mesBloqueado){
+      btnExcluir.disabled = true;
+      btnExcluir.title = tituloMesBloqueado;
+    } else {
+      btnExcluir.onclick = function(){ pedirConfirmacaoExclusao(p.id, p.nome); };
+    }
     actions.appendChild(btnExcluir);
 
     return div;
