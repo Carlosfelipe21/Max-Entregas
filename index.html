@@ -704,17 +704,82 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <script>
 (function(){
   "use strict";
+
+  // ======================================================================
+  // CONFIGURAÇÃO DA NUVEM (Firebase) — é o que faz os dados aparecerem
+  // em QUALQUER aparelho que abrir este link, e não só no celular onde
+  // foram digitados. Troque os 3 valores abaixo pelos do SEU projeto
+  // Firebase (gratuito). Passo a passo enviado junto com este arquivo.
+  // ======================================================================
+  var firebaseConfig = {
+    apiKey: "COLE_AQUI_SUA_API_KEY",
+    databaseURL: "https://COLE-AQUI-SEU-PROJETO-default-rtdb.firebaseio.com",
+    projectId: "COLE_AQUI_SEU_PROJECT_ID"
+  };
 
   var STORAGE_KEY = "maxEntregas_pacotes_v1";
   var pacotes = [];
   var idParaExcluir = null;
   var editandoId = null;
+  var pacotesRef = null;
+  var nuvemDisponivel = false;
+  var primeiraCargaNuvemRecebida = false;
 
   function gerarId(){
     return 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,9);
+  }
+
+  function inicializarNuvem(){
+    try{
+      if(!firebaseConfig.apiKey || firebaseConfig.apiKey.indexOf("COLE_AQUI") === 0){
+        nuvemDisponivel = false;
+        console.warn("Firebase não configurado: os dados ficarão salvos apenas neste aparelho.");
+        return;
+      }
+      firebase.initializeApp(firebaseConfig);
+      pacotesRef = firebase.database().ref("pacotes");
+      nuvemDisponivel = true;
+    }catch(e){
+      nuvemDisponivel = false;
+      console.warn("Não foi possível conectar à nuvem, usando apenas armazenamento local.", e);
+    }
+  }
+
+  // Escuta a nuvem em tempo real: qualquer alteração feita em OUTRO
+  // aparelho chega automaticamente aqui, sem precisar atualizar a página.
+  function iniciarSincronizacaoNuvem(){
+    if(!nuvemDisponivel || !pacotesRef) return;
+    pacotesRef.on("value", function(snapshot){
+      var dadosNuvem = snapshot.val();
+
+      if(dadosNuvem === null){
+        // Nuvem ainda vazia (primeiro uso): envia o que já existe neste aparelho, se houver.
+        primeiraCargaNuvemRecebida = true;
+        if(pacotes.length > 0) pacotesRef.set(pacotes);
+        return;
+      }
+
+      var lista = Array.isArray(dadosNuvem) ? dadosNuvem : Object.keys(dadosNuvem).map(function(k){ return dadosNuvem[k]; });
+
+      var novo = JSON.stringify(lista);
+      var atual = JSON.stringify(pacotes);
+      var primeiraCarga = !primeiraCargaNuvemRecebida;
+      primeiraCargaNuvemRecebida = true;
+
+      if(novo === atual) return;
+
+      pacotes = lista;
+      salvarLocal();
+      renderizar();
+      if(!primeiraCarga) mostrarToast("Lista atualizada (sincronizada de outro aparelho).", "success");
+    }, function(erro){
+      console.warn("Erro ao sincronizar com a nuvem:", erro);
+    });
   }
 
   function carregar(){
@@ -727,14 +792,25 @@
     }
   }
 
-  function salvar(){
+  function salvarLocal(){
     try{
       localStorage.setItem(STORAGE_KEY, JSON.stringify(pacotes));
       return true;
     }catch(e){
-      mostrarToast("Erro ao salvar os dados no navegador.", "danger");
+      mostrarToast("Erro ao salvar os dados neste aparelho.", "danger");
       return false;
     }
+  }
+
+  function salvar(){
+    var ok = salvarLocal();
+    if(nuvemDisponivel && pacotesRef){
+      pacotesRef.set(pacotes).catch(function(e){
+        console.warn("Erro ao sincronizar com a nuvem:", e);
+        mostrarToast("Salvo neste aparelho, mas sem conexão com a nuvem agora.", "danger");
+      });
+    }
+    return ok;
   }
 
   function formatarMoeda(v){
@@ -1232,9 +1308,11 @@
   }
 
   function init(){
+    inicializarNuvem();
     carregar();
     renderizar();
     mostrarView('home');
+    iniciarSincronizacaoNuvem();
 
     document.getElementById('btnAbrirModal').addEventListener('click', function(){ abrirModal(); });
     document.getElementById('btnCancelar').addEventListener('click', fecharModal);
